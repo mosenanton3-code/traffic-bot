@@ -9,8 +9,8 @@ from aiogram.types import ChatJoinRequest
 #        НАСТРОЙКИ
 # ========================
 BOT_TOKEN = "7793956570:AAGrWA34JMHjCSS6YS05AQa-w97j5nn8Nvk"
-CHANNEL_ID = -1006734850777  # ID канала (с префиксом -100)
-ADMIN_IDS = []  # Сюда добавь свой Telegram user_id для рассылки, например: [123456789]
+CHANNEL_ID = -1006734850777
+ADMIN_IDS = []  # Сюда добавь свой Telegram user_id, например: [123456789]
 
 # ========================
 #        ТЕКСТЫ
@@ -23,7 +23,8 @@ TEXT_JOIN_REQUEST = (
 
 TEXT_VERIFIED = (
     "✅ Спасибо! ❤️ Проверка пройдена.\n\n"
-    "Ты успешно добавлен в канал! Добро пожаловать! 🎉"
+    "Твоя заявка отправлена на рассмотрение администратору.\n"
+    "Скоро тебя одобрят — ожидай! 🎉"
 )
 
 TEXT_START = (
@@ -31,12 +32,11 @@ TEXT_START = (
     "Если ты подал заявку на вступление в канал — отправь /verify"
 )
 
-TEXT_ALREADY_VERIFIED = "✅ Ты уже верифицирован и добавлен в канал!"
+TEXT_ALREADY_VERIFIED = "✅ Ты уже верифицирован!"
 TEXT_NO_REQUEST = "❌ Заявка не найдена. Сначала подай заявку на вступление в канал."
-TEXT_ERROR = "❌ Произошла ошибка. Попробуй позже или обратись к администратору."
 
 # ========================
-#        БАЗА ДАНИХ
+#        БАЗА ДАННЫХ
 # ========================
 def init_db():
     conn = sqlite3.connect("users.db")
@@ -55,10 +55,7 @@ def init_db():
 def add_user(user_id: int, username: str):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR IGNORE INTO users (user_id, username, status)
-        VALUES (?, ?, 'pending')
-    """, (user_id, username))
+    cursor.execute("INSERT OR IGNORE INTO users (user_id, username, status) VALUES (?, ?, 'pending')", (user_id, username))
     conn.commit()
     conn.close()
 
@@ -102,99 +99,65 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-
-# --- Новая заявка на вступление в канал ---
 @dp.chat_join_request()
 async def on_join_request(request: ChatJoinRequest):
     user_id = request.from_user.id
     username = request.from_user.username or request.from_user.first_name
-
     add_user(user_id, username)
-
     try:
         await bot.send_message(chat_id=user_id, text=TEXT_JOIN_REQUEST)
         logging.info(f"Новая заявка от @{username} (id={user_id})")
     except Exception as e:
         logging.warning(f"Не могу написать пользователю {user_id}: {e}")
 
-
-# --- /start ---
 @dp.message(Command("start"))
 async def on_start(message: types.Message):
     await message.answer(TEXT_START)
 
-
-# --- /verify ---
 @dp.message(Command("verify"))
 async def on_verify(message: types.Message):
     user_id = message.from_user.id
     status = get_user_status(user_id)
-
     if status == "verified":
         await message.answer(TEXT_ALREADY_VERIFIED)
         return
-
     if status != "pending":
         await message.answer(TEXT_NO_REQUEST)
         return
+    set_verified(user_id)
+    await message.answer(TEXT_VERIFIED)
+    logging.info(f"Пользователь {user_id} прошёл верификацию")
 
-    try:
-        await bot.approve_chat_join_request(chat_id=CHANNEL_ID, user_id=user_id)
-        set_verified(user_id)
-        await message.answer(TEXT_VERIFIED)
-        logging.info(f"Пользователь {user_id} верифицирован и добавлен в канал")
-    except Exception as e:
-        logging.error(f"Ошибка при одобрении заявки {user_id}: {e}")
-        await message.answer(TEXT_ERROR)
-
-
-# --- /broadcast (только для админов) ---
 @dp.message(Command("broadcast"))
 async def on_broadcast(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-
     text = message.text.removeprefix("/broadcast").strip()
     if not text:
         await message.answer("Использование:\n/broadcast Текст сообщения")
         return
-
     users = get_all_verified()
     if not users:
-        await message.answer("Нет верифицированных пользователей для рассылки.")
+        await message.answer("Нет пользователей для рассылки.")
         return
-
     await message.answer(f"⏳ Начинаю рассылку для {len(users)} пользователей...")
-
     success, failed = 0, 0
     for user_id in users:
         try:
             await bot.send_message(chat_id=user_id, text=text)
             success += 1
-            await asyncio.sleep(0.05)  # защита от флуда
+            await asyncio.sleep(0.05)
         except Exception:
             failed += 1
-
     await message.answer(f"✅ Разослано: {success}\n❌ Не доставлено: {failed}")
 
-
-# --- /stats (только для админов) ---
 @dp.message(Command("stats"))
 async def on_stats(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
     pending, verified = get_stats()
-    await message.answer(
-        f"📊 Статистика:\n\n"
-        f"⏳ Ожидают верификации: {pending}\n"
-        f"✅ Верифицированы (в канале): {verified}\n"
-        f"👥 Всего: {pending + verified}"
-    )
+    await message.answer(f"📊 Статистика:\n\n⏳ Ожидают: {pending}\n✅ Верифицированы: {verified}\n👥 Всего: {pending + verified}")
 
-
-# ========================
-#        ЗАПУСК
-# ========================
 async def main():
     init_db()
     me = await bot.get_me()

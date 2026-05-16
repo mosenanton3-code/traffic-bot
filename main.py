@@ -1,9 +1,9 @@
 import asyncio
 import logging
 import sqlite3
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import ChatJoinRequest
+from aiogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
 
 # ========================
 #        НАСТРОЙКИ
@@ -18,8 +18,13 @@ ADMIN_IDS = []  # Сюда добавь свой Telegram user_id, наприм�
 TEXT_JOIN_REQUEST = (
     "👋 Привет! Твоя заявка получена.\n\n"
     "🔥 Анти-спам проверка.\n"
-    "Чтобы подтвердить что ты живой человек — отправь команду /verify"
+    "Нажми кнопку ниже, чтобы подтвердить что ты живой человек 👇"
 )
+
+def verify_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я не бот", callback_data="verify")]
+    ])
 
 TEXT_VERIFIED = (
     "✅ Спасибо! ❤️ Проверка пройдена.\n\n"
@@ -29,7 +34,7 @@ TEXT_VERIFIED = (
 
 TEXT_START = (
     "👋 Привет!\n\n"
-    "Если ты подал заявку на вступление в канал — отправь /verify"
+    "Если ты подал заявку на вступление в канал — нажми кнопку ниже 👇"
 )
 
 TEXT_ALREADY_VERIFIED = "✅ Ты уже верифицирован!"
@@ -105,14 +110,14 @@ async def on_join_request(request: ChatJoinRequest):
     username = request.from_user.username or request.from_user.first_name
     add_user(user_id, username)
     try:
-        await bot.send_message(chat_id=user_id, text=TEXT_JOIN_REQUEST)
+        await bot.send_message(chat_id=user_id, text=TEXT_JOIN_REQUEST, reply_markup=verify_keyboard())
         logging.info(f"Новая заявка от @{username} (id={user_id})")
     except Exception as e:
         logging.warning(f"Не могу написать пользователю {user_id}: {e}")
 
 @dp.message(Command("start"))
 async def on_start(message: types.Message):
-    await message.answer(TEXT_START)
+    await message.answer(TEXT_START, reply_markup=verify_keyboard())
 
 @dp.message(Command("verify"))
 async def on_verify(message: types.Message):
@@ -127,6 +132,20 @@ async def on_verify(message: types.Message):
     set_verified(user_id)
     await message.answer(TEXT_VERIFIED)
     logging.info(f"Пользователь {user_id} прошёл верификацию")
+
+@dp.callback_query(F.data == "verify")
+async def on_verify_button(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    status = get_user_status(user_id)
+    if status == "verified":
+        await callback.answer("Ты уже верифицирован! ✅", show_alert=False)
+        return
+    if status != "pending":
+        await callback.answer("Заявка не найдена.", show_alert=True)
+        return
+    set_verified(user_id)
+    await callback.message.edit_text(TEXT_VERIFIED)
+    logging.info(f"Пользователь {user_id} прошёл верификацию через кнопку")
 
 @dp.message(Command("broadcast"))
 async def on_broadcast(message: types.Message):

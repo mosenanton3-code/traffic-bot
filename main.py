@@ -10,7 +10,7 @@ from aiogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardB
 # ========================
 BOT_TOKEN = "7793956570:AAGrWA34JMHjCSS6YS05AQa-w97j5nn8Nvk"
 CHANNEL_ID = -1006734850777
-ADMIN_IDS = []  # Сюда добавь свой Telegram user_id, например: [123456789]
+ADMIN_IDS = [6734850777]
 
 # ========================
 #        ТЕКСТЫ

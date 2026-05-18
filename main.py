@@ -5,65 +5,39 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
 
-# ========================
-#        НАСТРОЙКИ
-# ========================
 BOT_TOKEN = "7793956570:AAGrWA34JMHjCSS6YS05AQa-w97j5nn8Nvk"
 CHANNEL_ID = -1006734850777
 ADMIN_IDS = [6734850777]
 
-# ========================
-#        ТЕКСТЫ
-# ========================
-TEXT_JOIN_REQUEST = (
-    "👋 Привет! Твоя заявка получена.\n"
-    " \n"
-    "🔥 Анти-спам проверка.\n"
-    " \n"
-    "Нажми кнопку ниже, чтобы подтвердить что ты живой человек 👇"
-)
-
-TEXT_VERIFIED = (
-    "✅ Спасибо! ❤️ Проверка пройдена.\n"
-    " \n"
-    "Твоя заявка отправлена на рассмотрение администратору.\n"
-    " \n"
-    "Скоро тебя одобрят - ожидай! 🎉"
-)
-
-TEXT_START = (
-    "👋 Привет!\n\n"
-    "Если ты подал заявку на вступление в канал - нажми кнопку ниже 👇"
-)
-
+TEXT_JOIN_REQUEST = "👋 Привет! Твоя заявка получена.\n \n🔥 Анти-спам проверка.\n \nНажми кнопку ниже, чтобы подтвердить что ты живой человек 👇"
+TEXT_VERIFIED = "✅ Спасибо! ❤️ Проверка пройдена.\n \nТвоя заявка отправлена на рассмотрение администратору.\n \nСкоро тебя одобрят — ожидай! 🎉"
+TEXT_START = "👋 Привет!\n \nЕсли ты подал заявку на вступление в канал — нажми кнопку ниже 👇"
 TEXT_ALREADY_VERIFIED = "✅ Ты уже верифицирован!"
 TEXT_NO_REQUEST = "❌ Заявка не найдена. Сначала подай заявку на вступление в канал."
 
-# ========================
-#        БАЗА ДАННЫХ
-# ========================
+def verify_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я не бот", callback_data="verify")]
+    ])
+
 def init_db():
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id   INTEGER PRIMARY KEY,
-            username  TEXT,
-            status    TEXT DEFAULT 'pending',
-            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    cursor.execute("""CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY, username TEXT,
+        status TEXT DEFAULT 'pending',
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
     conn.commit()
     conn.close()
 
-def add_user(user_id: int, username: str):
+def add_user(user_id, username):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO users (user_id, username, status) VALUES (?, ?, 'pending')", (user_id, username))
     conn.commit()
     conn.close()
 
-def get_user_status(user_id: int):
+def get_user_status(user_id):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
     cursor.execute("SELECT status FROM users WHERE user_id = ?", (user_id,))
@@ -71,7 +45,7 @@ def get_user_status(user_id: int):
     conn.close()
     return row[0] if row else None
 
-def set_verified(user_id: int):
+def set_verified(user_id):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET status = 'verified' WHERE user_id = ?", (user_id,))
@@ -96,10 +70,7 @@ def get_stats():
     conn.close()
     return pending, verified
 
-# ========================
-#        БОТ
-# ========================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -110,9 +81,8 @@ async def on_join_request(request: ChatJoinRequest):
     add_user(user_id, username)
     try:
         await bot.send_message(chat_id=user_id, text=TEXT_JOIN_REQUEST, reply_markup=verify_keyboard())
-        logging.info(f"Новая заявка от @{username} (id={user_id})")
     except Exception as e:
-        logging.warning(f"Не могу написать пользователю {user_id}: {e}")
+        logging.warning(f"Не могу написать {user_id}: {e}")
 
 @dp.message(Command("start"))
 async def on_start(message: types.Message):
@@ -130,21 +100,19 @@ async def on_verify(message: types.Message):
         return
     set_verified(user_id)
     await message.answer(TEXT_VERIFIED)
-    logging.info(f"Пользователь {user_id} прошёл верификацию")
 
 @dp.callback_query(F.data == "verify")
 async def on_verify_button(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     status = get_user_status(user_id)
     if status == "verified":
-        await callback.answer("Ты уже верифицирован! ✅", show_alert=False)
+        await callback.answer("Ты уже верифицирован! ✅")
         return
     if status != "pending":
         await callback.answer("Заявка не найдена.", show_alert=True)
         return
     set_verified(user_id)
     await callback.message.edit_text(TEXT_VERIFIED)
-    logging.info(f"Пользователь {user_id} прошёл верификацию через кнопку")
 
 @dp.message(Command("broadcast"))
 async def on_broadcast(message: types.Message):
@@ -152,17 +120,17 @@ async def on_broadcast(message: types.Message):
         return
     text = message.text.removeprefix("/broadcast").strip()
     if not text:
-        await message.answer("Использование:\n/broadcast Текст сообщения")
+        await message.answer("Использование: /broadcast Текст")
         return
     users = get_all_verified()
     if not users:
         await message.answer("Нет пользователей для рассылки.")
         return
-    await message.answer(f"⏳ Начинаю рассылку для {len(users)} пользователей...")
+    await message.answer(f"⏳ Рассылка для {len(users)} пользователей...")
     success, failed = 0, 0
-    for user_id in users:
+    for uid in users:
         try:
-            await bot.send_message(chat_id=user_id, text=text)
+            await bot.send_message(chat_id=uid, text=text)
             success += 1
             await asyncio.sleep(0.05)
         except Exception:
@@ -174,7 +142,7 @@ async def on_stats(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
     pending, verified = get_stats()
-    await message.answer(f"📊 Статистика:\n\n⏳ Ожидают: {pending}\n✅ Верифицированы: {verified}\n👥 Всего: {pending + verified}")
+    await message.answer(f"📊 Статистика:\n⏳ Ожидают: {pending}\n✅ Верифицированы: {verified}\n👥 Всего: {pending + verified}")
 
 async def main():
     init_db()
